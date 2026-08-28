@@ -91,7 +91,7 @@ Example with Claude Desktop (`claude_desktop_config.json`):
     "command": "node",
     "args": ["/path/to/mnemonic_mcp/dist/server.js"],
     "env": {
-      "MEMORY_FILE_PATH": "/home/max/Documents/my-memory.md"
+      "MEMORY_FILE_PATH": "~/Documents/my-memory.md"
     }
   }
 }
