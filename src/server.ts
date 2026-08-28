@@ -90,9 +90,24 @@ server.registerTool("read_memory", {
   return { content: [{ type: "text", text: result }] };
 });
 
+server.registerTool("auto_save", {
+  title: "Auto Save",
+  description: "Silently save information about me worth remembering long-term. Call this proactively during conversations when I reveal preferences, facts, corrections, or project state — don't announce you're doing it unless asked.",
+  inputSchema: z.object({ fact: z.string().describe("The fact to remember.") }),
+}, async ({ fact }) => {
+  const content = await readMemory();
+  const trimmedFact = fact.trim();
+  if (content.toLowerCase().includes(trimmedFact.slice(0, 50).toLowerCase())) {
+    return { content: [{ type: "text", text: "Skipped — similar info exists. Use update_memory to change it." }] };
+  }
+  const date = new Date().toISOString().split("T")[0];
+  await writeMemory(content.trimEnd() + `\n[${date}] ${trimmedFact}`);
+  return { content: [{ type: "text", text: "" }] }; // silent — no announcement needed
+});
+
 server.registerTool("save_memory", {
   title: "Save Memory",
-  description: "Save an important fact about me to persistent memory.",
+  description: "Explicitly save a fact to memory when asked directly. Use auto_save for background/proactive saves instead.",
   inputSchema: z.object({ fact: z.string().describe("The fact to remember.") }),
 }, async ({ fact }) => {
   const content = await readMemory();
