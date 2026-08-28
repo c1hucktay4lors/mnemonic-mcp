@@ -83,31 +83,6 @@ If working, it will call `list_sections()` or `read_memory()` automatically. You
 
 The model should call `save_memory` or `auto_save` and add it to your memory file at `~/.mcp-memory/memory.md`.
 
-#### LM Studio via Settings UI (alternative)
-
-If you prefer configuring through the GUI instead of editing JSON:
-
-1. Open **Settings** → **MCP Servers**
-2. Click **Add Server** (or **+**)
-3. Fill in:
-   - Name: `Memory` (or any name you like)
-   - Command: `node`
-   - Arguments: `/full/path/to/mnemonic-mcp/dist/server.js`
-4. Save and restart LM Studio
-
-#### Claude Desktop (`claude_desktop_config.json`)
-
-Add under `"mcpServers"`:
-
-```json
-{
-  "memory": {
-    "command": "node",
-    "args": ["/path/to/mnemonic-mcp/dist/server.js"],
-    "cwd": "/path/to/mnemonic-mcp"
-  }
-}
-```
 
 #### Any MCP client (stdio transport)
 
@@ -137,7 +112,6 @@ Use this as your server config:
 - Memory uses a shared file, so it persists by default. If it's not saving:
   - Check your memory file exists: open `~/.mcp-memory/memory.md` (Linux/macOS) or `%USERPROFILE%\.mcp-memory\memory.md` (Windows).
   - Ask the model explicitly: "What tools do you have? Use one of them to save something."
-```
 
 ## Storage
 
@@ -170,20 +144,6 @@ node dist\server.js
 # Windows (CMD)
 set MEMORY_FILE_PATH=C:\Users\YourName\Documents\my-memory.md
 node dist\server.js
-```
-
-Example with Claude Desktop (`claude_desktop_config.json`):
-
-```json
-{
-  "memory": {
-    "command": "node",
-    "args": ["/path/to/mnemonic-mcp/dist/server.js"],
-    "env": {
-      "MEMORY_FILE_PATH": "~/Documents/my-memory.md"
-    }
-  }
-}
 ```
 
 ## Memory file format
