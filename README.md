@@ -11,14 +11,23 @@ Persistent memory server for MCP clients — lets AI assistants remember things 
 | Tool | Description |
 |------|-------------|
 | `read_memory` | Read all memory or a specific section by name |
-| `auto_save` | Silently save info during conversations (proactive/background) |
-| `save_memory` | Explicitly save a fact when asked directly |
+| `auto_save` | Silently save info during conversations (proactive/background). Automatically categorizes into sections. |
+| `save_memory` | Explicitly save a fact when asked directly. Auto-categorizes. |
 | `update_memory` | Find and replace existing content |
 | `delete_memory` | Remove content by unique fragment |
 | `search_memory` | Keyword search across all entries |
 | `list_sections` | List section headers for navigation |
 | `save_to_section` | Add info under a named section (creates if missing) |
 | `replace_section` | Overwrite an entire section at once |
+| `tidy_memory` | Organize orphaned dated entries into proper sections. Use when memory looks messy. |
+
+**Smart categorization:** When saving facts, the server automatically detects the right section:
+- Hardware/peripherals/devices → **Tech Setup & Hardware**
+- Food/drink/preferences/health → **Personal Preferences**
+- Games/hobbies/projects/skills → **Interests & Projects**
+- Communication style preferences → **Communication Preferences**
+
+Unclassifiable facts become dated entries at the bottom. You can run `tidy_memory` anytime to clean those up.
 
 ## Setup
 

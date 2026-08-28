@@ -28,6 +28,45 @@ function resolveMemoryPath(): string {
 
 const memoryFilePath = resolveMemoryPath();
 
+// ---------- Smart Categorization ----------
+
+interface CategoryRule {
+  section: string;
+  keywords: string[];
+}
+
+const CATEGORY_RULES: CategoryRule[] = [
+  {
+    section: "Tech Setup & Hardware",
+    keywords: ["keyboard","mouse","monitor","gpu","cpu","ram","phone","tablet","laptop","desktop","pc","hardware","peripheral","device","samsung","iphone","android","windows","linux","macos","arch","kde","plasma","wayland","xorg","steamdeck","nvidia","amd","intel","rx ","geforce","switches","mechanical","logitech","keychron","gaming mouse","screen","display","ssd","nvme","storage","hard drive"],
+  },
+  {
+    section: "Personal Preferences",
+    keywords: ["coffee","tea","food","eat","drink","prefer","like ","love ","hate ","dislike","taste","flavor","diet","health","exercise","workout","sleep","schedule","morning routine","bedtime","music taste","movie","movies","show","shows","book","books","anime","genre"],
+  },
+  {
+    section: "Interests & Projects",
+    keywords: ["game","gaming","coding","programming","project","hobby","modding","learning","studying","interested in","into ","fan of","play ","watch ","read ","building","creating","developing","research","experiment"],
+  },
+  {
+    section: "Communication Preferences",
+    keywords: ["communicate","explain","talk to me","respond","format","style of answer","how you talk","directly","concise","verbose","step-by-step","no fluff","be brief"],
+  },
+];
+
+function detectCategory(fact: string): CategoryRule | null {
+  const lower = fact.toLowerCase();
+  let bestMatch: CategoryRule | null = null;
+  let maxScore = 0;
+
+  for (const rule of CATEGORY_RULES) {
+    const score = rule.keywords.reduce((acc, kw) => acc + (lower.includes(kw) ? 1 : 0), 0);
+    if (score > maxScore) { maxScore = score; bestMatch = rule; }
+  }
+
+  return maxScore >= 1 ? bestMatch : null;
+}
+
 function ensureDirectory(filePath: string): void {
   const dir = path.dirname(filePath);
   if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
@@ -101,34 +140,73 @@ server.registerTool("read_memory", {
   return { content: [{ type: "text", text: result }] };
 });
 
+async function smartSaveFact(fact: string, content: string): Promise<{ saved: boolean; target?: string }> {
+  const trimmedFact = fact.trim();
+
+  // Dedup check
+  if (content.toLowerCase().includes(trimmedFact.slice(0, 50).toLowerCase())) {
+    return { saved: false };
+  }
+
+  const category = detectCategory(trimmedFact);
+
+  if (category) {
+    // Route to appropriate section using save_to_section logic inline
+    const lines = content.split("\n");
+    const range = findSection(lines, category.section);
+
+    let newContent: string;
+    if (!range) {
+      // Create new section at end of file
+      newContent = content.trimEnd() + `\n\n## ${category.section}\n- ${trimmedFact}`;
+    } else {
+      const before = lines.slice(0, range.end).join("\n");
+      const after = lines.slice(range.end).join("\n");
+      // Append as bullet point under section header
+      newContent = before.trimEnd() + `\n- ${trimmedFact}` + after;
+    }
+
+    await writeMemory(newContent);
+    return { saved: true, target: category.section };
+  }
+
+  // No confident match — fall back to dated entry at bottom
+  const date = new Date().toISOString().split("T")[0];
+  await writeMemory(content.trimEnd() + `\n[${date}] ${trimmedFact}`);
+  return { saved: true, target: "dated entry" };
+}
+
 server.registerTool("auto_save", {
   title: "Auto Save",
   description: "Silently save information about me worth remembering long-term. Call this proactively during conversations when I reveal preferences, facts, corrections, or project state — don't announce you're doing it unless asked.",
   inputSchema: z.object({ fact: z.string().describe("The fact to remember.") }),
 }, async ({ fact }) => {
   const content = await readMemory();
-  const trimmedFact = fact.trim();
-  if (content.toLowerCase().includes(trimmedFact.slice(0, 50).toLowerCase())) {
-    return { content: [{ type: "text", text: "Skipped — similar info exists. Use update_memory to change it." }] };
+  const result = await smartSaveFact(fact, content);
+
+  if (!result.saved) {
+    return { content: [{ type: "text", text: "" }] }; // silent skip
   }
-  const date = new Date().toISOString().split("T")[0];
-  await writeMemory(content.trimEnd() + `\n[${date}] ${trimmedFact}`);
-  return { content: [{ type: "text", text: "" }] }; // silent — no announcement needed
+
+  // Silent — no announcement needed. Model can optionally log internally.
+  const targetStr = result.target ? ` (to ${result.target})` : "";
+  return { content: [{ type: "text", text: targetStr }] };
 });
 
 server.registerTool("save_memory", {
   title: "Save Memory",
-  description: "Explicitly save a fact to memory when asked directly. Use auto_save for background/proactive saves instead.",
+  description: "Explicitly save a fact to memory when asked directly. Automatically categorizes into appropriate section.",
   inputSchema: z.object({ fact: z.string().describe("The fact to remember.") }),
 }, async ({ fact }) => {
   const content = await readMemory();
-  const trimmedFact = fact.trim();
-  if (content.toLowerCase().includes(trimmedFact.slice(0, 50).toLowerCase())) {
+  const result = await smartSaveFact(fact, content);
+
+  if (!result.saved) {
     return { content: [{ type: "text", text: "Skipped — similar info exists. Use update_memory to change it." }] };
   }
-  const date = new Date().toISOString().split("T")[0];
-  await writeMemory(content.trimEnd() + `\n[${date}] ${trimmedFact}`);
-  return { content: [{ type: "text", text: "Saved." }] };
+
+  const where = result.target ? ` (to ${result.target})` : "";
+  return { content: [{ type: "text", text: "Saved." + where }] };
 });
 
 server.registerTool("update_memory", {
@@ -283,6 +361,106 @@ server.registerTool("replace_section", {
   const newLines = [...lines.slice(0, range.start), lines[range.start], "", new_content.trim(), "", ...lines.slice(range.end)];
   await writeMemory(newLines.join("\n"));
   return { content: [{ type: "text", text: `Replaced '${section}'.` }] };
+});
+
+server.registerTool("tidy_memory", {
+  title: "Tidy Memory",
+  description: "Organize standalone dated entries into appropriate sections. Use this when memory.md has many orphaned entries that could be categorized.",
+}, async () => {
+  const content = await readMemory();
+  if (!content.trim()) return { content: [{ type: "text", text: "Nothing to tidy." }] };
+
+  const lines = content.split("\n");
+
+  // Extract ALL standalone dated entries anywhere in file (they shouldn't be inside sections)
+  interface DatedEntry { lineNum: number; date: string; fact: string }
+  const datedEntries: DatedEntry[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^\[(\d{4}-\d{2}-\d{2})\]\s+(.+)$/);
+    if (match) {
+      datedEntries.push({ lineNum: i, date: match[1], fact: match[2] });
+    }
+  }
+
+  if (datedEntries.length === 0) {
+    return { content: [{ type: "text", text: "No standalone dated entries found to organize." }] };
+  }
+
+  // Categorize each entry and group by target section
+  const moves: Record<string, string[]> = {}; // section -> [facts]
+  const uncategorized: DatedEntry[] = [];
+
+  for (const entry of datedEntries) {
+    const category = detectCategory(entry.fact);
+    if (category) {
+      if (!moves[category.section]) moves[category.section] = [];
+      moves[category.section].push(`- ${entry.fact}`);
+    } else {
+      uncategorized.push(entry);
+    }
+  }
+
+  // Build new content: remove dated entries, add to sections
+  const keptLines = lines.filter((_, i) => !datedEntries.some(d => d.lineNum === i));
+
+  // Insert categorized facts into their sections
+  let resultContent = keptLines.join("\n");
+
+  for (const [section, facts] of Object.entries(moves)) {
+    const sectionHeader = `## ${section}`;
+    if (resultContent.includes(sectionHeader)) {
+      // Append to existing section — insert before next ## or end
+      const idx = resultContent.indexOf(sectionHeader);
+      let insertPoint = resultContent.length;
+      for (let i = idx + sectionHeader.length; i < resultContent.length; i++) {
+        if (resultContent[i] === "\n" && resultContent.slice(i + 1, i + 3) === "## ") {
+          insertPoint = i + 1; // before next header's newline
+          break;
+        }
+      }
+
+      const factsBlock = `\n${facts.join("\n")}`;
+      if (insertPoint < resultContent.length) {
+        resultContent = resultContent.slice(0, insertPoint).trimEnd() + factsBlock + "\n" + resultContent.slice(insertPoint);
+      } else {
+        resultContent = resultContent.trimEnd() + factsBlock;
+      }
+    } else {
+      // Create new section at end (before any remaining uncategorized dated entries)
+      const factsBlock = `\n\n## ${section}\n${facts.join("\n")}`;
+
+      if (uncategorized.length > 0) {
+        // Insert before the first remaining dated entry line
+        const firstUncatLine = resultContent.indexOf(`[${uncategorized[0].date}]`);
+        if (firstUncatLine !== -1) {
+          resultContent = resultContent.slice(0, firstUncatLine).trimEnd() + factsBlock + "\n\n" + resultContent.slice(firstUncatLine);
+        } else {
+          resultContent += factsBlock;
+        }
+      } else {
+        resultContent = resultContent.trimEnd() + factsBlock;
+      }
+    }
+  }
+
+  // Clean up excessive blank lines and normalize formatting
+  resultContent = resultContent.replace(/\n{3,}/g, "\n\n");
+
+  await writeMemory(resultContent);
+
+  const movedCount = Object.values(moves).reduce((sum, arr) => sum + arr.length, 0);
+  const summaryLines: string[] = [`Tidied ${datedEntries.length} standalone entry${datedEntries.length > 1 ? "ies" : ""}.`];
+
+  for (const [section, facts] of Object.entries(moves)) {
+    summaryLines.push(`→ Moved ${facts.length} to "${section}"`);
+  }
+
+  if (uncategorized.length > 0) {
+    summaryLines.push(`${uncategorized.length} left as dated entries (couldn't categorize confidently)`);
+  }
+
+  return { content: [{ type: "text", text: summaryLines.join("\n") }] };
 });
 
 // ---------- Start ----------
