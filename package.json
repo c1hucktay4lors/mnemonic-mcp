@@ -1,0 +1,21 @@
+{
+  "name": "@max/mnemonic-mcp",
+  "version": "1.0.0",
+  "description": "Persistent memory MCP server for AI assistants — lets models remember things about you across sessions via a simple markdown file.",
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.6",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0"
+  }
+}
