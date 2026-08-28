@@ -10,12 +10,14 @@ Persistent memory server for MCP clients — lets AI assistants remember things 
 
 | Tool | Description |
 |------|-------------|
-| `read_memory` | Read all memory or a specific section (e.g., "Health & Wellness") |
-| `save_memory` | Append a dated fact to memory |
+| `read_memory` | Read all memory or a specific section by name |
+| `auto_save` | Silently save info during conversations (proactive/background) |
+| `save_memory` | Explicitly save a fact when asked directly |
 | `update_memory` | Find and replace existing content |
 | `delete_memory` | Remove content by unique fragment |
-| `search_memory` | Search for info in memory |
-| `save_to_section` | Add structured info under a named section (creates if missing) |
+| `search_memory` | Keyword search across all entries |
+| `list_sections` | List section headers for navigation |
+| `save_to_section` | Add info under a named section (creates if missing) |
 | `replace_section` | Overwrite an entire section at once |
 
 ## Setup
@@ -65,22 +67,35 @@ Use this as your server config:
 
 ## Storage
 
-Memory is stored in a single markdown file. Auto-backups go into `backups/` (keeps last 10).
+Memory is stored in a single markdown file. Auto-backups go into `backups/` (keeps last 10). Works cross-platform without any configuration needed.
 
-### Default path (Linux/macOS)
+### Default path
 
-```
-~/.local/share/mnemonic-mcp/memory.md
-```
+On first run, creates:
+
+| Platform | Path |
+|----------|------|
+| Linux / macOS | `~/.mcp-memory/memory.md` |
+| Windows | `%USERPROFILE%\.mcp-memory\memory.md` |
+
+If an older-style file exists at `~/.local/share/mcp-memory/memory.md`, it will be used automatically for backward compatibility.
 
 ### Override via environment variable
 
 Set `MEMORY_FILE_PATH` to use a custom location:
 
 ```bash
-# Linux/macOS export, or add to your config's env section
+# Linux/macOS
 export MEMORY_FILE_PATH="$HOME/Documents/my-memory.md"
 node dist/server.js
+
+# Windows (PowerShell)
+$env:MEMORY_FILE_PATH="C:\Users\YourName\Documents\my-memory.md"
+node dist\server.js
+
+# Windows (CMD)
+set MEMORY_FILE_PATH=C:\Users\YourName\Documents\my-memory.md
+node dist\server.js
 ```
 
 Example with Claude Desktop (`claude_desktop_config.json`):

@@ -3,16 +3,27 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const DEFAULT_MEMORY_DIR = process.env.XDG_DATA_HOME || "~/.local/share/mcp-memory";
 const BACKUP_RETENTION = 10;
 
 function resolveMemoryPath(): string {
-  const envPath = process.env.MEMORY_FILE_PATH;
-  if (envPath) return envPath;
-  let dir = DEFAULT_MEMORY_DIR.replace(/^~/, process.env.HOME || "~");
-  return path.join(dir, "memory.md");
+  // Allow override via env var for custom paths
+  if (process.env.MEMORY_FILE_PATH) return process.env.MEMORY_FILE_PATH;
+
+  const homeDir = os.homedir();
+  const newDefault = path.join(homeDir, ".mcp-memory", "memory.md");
+  
+  // Backward compat: fall back to old XDG-style location if it exists
+  const legacyPath = process.env.XDG_DATA_HOME || path.join(homeDir, ".local", "share", "mcp-memory");
+  const legacyFile = path.join(legacyPath, "memory.md");
+
+  try { fsSync.accessSync(newDefault); return newDefault; } catch {}
+  try { fsSync.accessSync(legacyFile); return legacyFile; } catch {}
+
+  // Neither exists yet — default to the simpler path going forward
+  return newDefault;
 }
 
 const memoryFilePath = resolveMemoryPath();
