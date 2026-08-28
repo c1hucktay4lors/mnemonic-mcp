@@ -32,12 +32,68 @@ npm run build
 
 ### 2. Configure your MCP client
 
-#### LM Studio
+#### LM Studio (recommended)
 
-In **Settings → MCP Servers**, add:
+LM Studio supports MCP servers via its built-in configuration file.
 
-- Name: `Memory`
-- Command: `node /path/to/mnemonic_mcp/dist/server.js`
+**Step 1: Locate or create the config file:**
+
+| Platform | Config path |
+|----------|-------------|
+| Linux / macOS | `~/.lmstudio/mcp.json` |
+| Windows | `%APPDATA%\LMStudio\mcp.json` |
+
+Create the folder if needed. Example on Linux/macOS:
+```bash
+mkdir -p ~/.lmstudio
+touch ~/.lmstudio/mcp.json
+```
+
+**Step 2: Add mnemonic-mcp:**
+
+Open `mcp.json` and add a `"mnemonic"` entry under `"mcpServers"`. Replace the path with where you cloned this repo:
+
+```json
+{
+  "mcpServers": {
+    "mnemonic": {
+      "command": "node",
+      "args": ["/full/path/to/mnemonic-mcp/dist/server.js"],
+      "cwd": "/full/path/to/mnemonic-mcp"
+    }
+  }
+}
+```
+
+Examples:
+- Linux/macOS: `/home/username/Projects/mnemonic-mcp/dist/server.js`
+- Windows: `C:\Users\YourName\Projects\mnemonic-mcp\dist\server.js`
+
+**Step 3: Restart LM Studio** (or reload MCP from Settings → Tools).
+
+**Step 4: Test it:**
+
+Start a new chat and ask your model something like:
+
+> "Check what tools you have available. If you see memory-related tools, list the sections in my memory."
+
+If working, it will call `list_sections()` or `read_memory()` automatically. You can also directly ask:
+
+> "Remember that I use Arch Linux with KDE Plasma and prefer direct answers."
+
+The model should call `save_memory` or `auto_save` and add it to your memory file at `~/.mcp-memory/memory.md`.
+
+#### LM Studio via Settings UI (alternative)
+
+If you prefer configuring through the GUI instead of editing JSON:
+
+1. Open **Settings** → **MCP Servers**
+2. Click **Add Server** (or **+**)
+3. Fill in:
+   - Name: `Memory` (or any name you like)
+   - Command: `node`
+   - Arguments: `/full/path/to/mnemonic-mcp/dist/server.js`
+4. Save and restart LM Studio
 
 #### Claude Desktop (`claude_desktop_config.json`)
 
@@ -47,8 +103,8 @@ Add under `"mcpServers"`:
 {
   "memory": {
     "command": "node",
-    "args": ["/path/to/mnemonic_mcp/dist/server.js"],
-    "cwd": "/path/to/mnemonic_mcp"
+    "args": ["/path/to/mnemonic-mcp/dist/server.js"],
+    "cwd": "/path/to/mnemonic-mcp"
   }
 }
 ```
@@ -60,9 +116,27 @@ Use this as your server config:
 ```json
 {
   "command": "node",
-  "args": ["/path/to/mnemonic_mcp/dist/server.js"],
-  "cwd": "/path/to/mnemonic_mcp"
+  "args": ["/path/to/mnemonic-mcp/dist/server.js"],
+  "cwd": "/path/to/mnemonic-mcp"
 }
+```
+
+### Troubleshooting LM Studio
+
+**Tools not showing up:**
+- Make sure you're using the **full absolute path** to `dist/server.js` — relative paths don't work.
+- Restart LM Studio after editing `mcp.json`. Changes aren't picked up live in some versions.
+- Check the MCP server status: Settings → Tools → look for your mnemonic entry.
+
+**"Module not found" or crash:**
+- Verify you ran `npm install` and `npm run build` first.
+- Ensure Node.js is installed (`node --version`).
+- Double-check the path has no typos — especially on Windows with backslashes vs forward slashes (JSON paths should use `/` or double backslash `\\`).
+
+**Memory not persisting between chats:**
+- Memory uses a shared file, so it persists by default. If it's not saving:
+  - Check your memory file exists: open `~/.mcp-memory/memory.md` (Linux/macOS) or `%USERPROFILE%\.mcp-memory\memory.md` (Windows).
+  - Ask the model explicitly: "What tools do you have? Use one of them to save something."
 ```
 
 ## Storage
@@ -104,7 +178,7 @@ Example with Claude Desktop (`claude_desktop_config.json`):
 {
   "memory": {
     "command": "node",
-    "args": ["/path/to/mnemonic_mcp/dist/server.js"],
+    "args": ["/path/to/mnemonic-mcp/dist/server.js"],
     "env": {
       "MEMORY_FILE_PATH": "~/Documents/my-memory.md"
     }
