@@ -54,6 +54,15 @@ const CATEGORY_RULES: CategoryRule[] = [
   },
 ];
 
+// Additional rules for auto_save/smartSaveFact that detect project/identity facts
+const AUTO_SAVE_CATEGORY_RULES: CategoryRule[] = [
+  ...CATEGORY_RULES,
+  {
+    section: "Interests & Projects",
+    keywords: ["created ","built ","made ","working on","developing ","maintaining ","contributing to","open source","mcp server","tool for","cli tool","script i wrote"],
+  },
+];
+
 function detectCategory(fact: string): CategoryRule | null {
   const lower = fact.toLowerCase();
   let bestMatch: CategoryRule | null = null;
@@ -148,31 +157,40 @@ async function smartSaveFact(fact: string, content: string): Promise<{ saved: bo
     return { saved: false };
   }
 
-  const category = detectCategory(trimmedFact);
+  // Use extended rules for auto-save to catch project/identity facts better
+  const lower = trimmedFact.toLowerCase();
+  let bestMatch: CategoryRule | null = null;
+  let maxScore = 0;
 
-  if (category) {
+  for (const rule of AUTO_SAVE_CATEGORY_RULES) {
+    const score = rule.keywords.reduce((acc, kw) => acc + (lower.includes(kw) ? 1 : 0), 0);
+    if (score > maxScore) { maxScore = score; bestMatch = rule; }
+  }
+
+  if (maxScore >= 1 && bestMatch) {
     // Route to appropriate section using save_to_section logic inline
     const lines = content.split("\n");
-    const range = findSection(lines, category.section);
+    const range = findSection(lines, bestMatch.section);
 
     let newContent: string;
     if (!range) {
       // Create new section at end of file
-      newContent = content.trimEnd() + `\n\n## ${category.section}\n- ${trimmedFact}`;
+      newContent = content.trimEnd() + `\n\n## ${bestMatch.section}\n- ${trimmedFact}`;
     } else {
       const before = lines.slice(0, range.end).join("\n");
       const after = lines.slice(range.end).join("\n");
-      // Append as bullet point under section header
-      newContent = before.trimEnd() + `\n- ${trimmedFact}` + after;
+      // Ensure proper newline separation: trim trailing whitespace/newlines from existing content,
+      // then add blank line + new bullet for readability
+      newContent = before.trimEnd() + `\n\n- ${trimmedFact}` + after;
     }
 
     await writeMemory(newContent);
-    return { saved: true, target: category.section };
+    return { saved: true, target: bestMatch.section };
   }
 
   // No confident match — fall back to dated entry at bottom
   const date = new Date().toISOString().split("T")[0];
-  await writeMemory(content.trimEnd() + `\n[${date}] ${trimmedFact}`);
+  await writeMemory(content.trimEnd() + `\n\n[${date}] ${trimmedFact}`);
   return { saved: true, target: "dated entry" };
 }
 
@@ -462,7 +480,6 @@ server.registerTool("tidy_memory", {
 
   return { content: [{ type: "text", text: summaryLines.join("\n") }] };
 });
-
 // ---------- Start ----------
 
 async function main() {
