@@ -20,6 +20,7 @@ Persistent memory server for MCP clients — lets AI assistants remember things 
 | `save_to_section` | Add info under a named section (creates if missing) |
 | `replace_section` | Overwrite an entire section at once |
 | `tidy_memory` | Organize orphaned dated entries into proper sections. Use when memory looks messy. |
+| `context_status` | Check LM Studio context-window usage: exact tokens used (from LM Studio's own records), limit, remaining, percent, and NORMAL/WARNING/CRITICAL/EMERGENCY status. For self-managing long tasks — write checkpoints via this server before running low. Requires LM Studio on localhost:1234 with a conversation active. |
 
 **Smart categorization:** When saving facts, the server automatically detects the right section:
 - Hardware/peripherals/devices → **Tech Setup & Hardware**

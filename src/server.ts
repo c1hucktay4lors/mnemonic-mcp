@@ -480,6 +480,171 @@ server.registerTool("tidy_memory", {
 
   return { content: [{ type: "text", text: summaryLines.join("\n") }] };
 });
+
+// ---------- Context Window Monitoring ----------
+//
+// Reports the REAL context usage of the active LM Studio conversation using
+// data that LM Studio itself writes — not estimates:
+//   - LIMIT (authoritative): GET {LMS_API_BASE}/api/v0/models -> loaded model's
+//     `loaded_context_length` (what llama.cpp actually allocated).
+//   - USED (exact, one step behind): newest ~/.lmstudio/conversations/*.conversation.json,
+//     last genInfo.stats.promptTokensCount — the exact prompt token count written by
+//     LM Studio from llama.cpp's tokenizer after each generation.
+// Note: reflects the last COMPLETED generation; the in-flight tool round-trip adds a small delta.
+
+const LMS_API_BASE = process.env.LMS_API_BASE || "http://localhost:1234";
+const CONVERSATIONS_DIR =
+  process.env.LMS_CONVERSATIONS_DIR || path.join(os.homedir(), ".lmstudio", "conversations");
+
+const CTX_THRESHOLDS = { WARNING: 60, CRITICAL: 85, EMERGENCY: 95 };
+
+async function lmsGetJson(url: string): Promise<any> {
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function findConversationFiles(dir: string): Promise<string[]> {
+  let entries;
+  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return []; }
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...(await findConversationFiles(full)));
+    else if (e.isFile() && e.name.endsWith(".conversation.json")) out.push(full);
+  }
+  return out;
+}
+
+interface ActiveConversation { filePath: string; mtimeMs: number; data: any; }
+
+async function findActiveConversation(): Promise<ActiveConversation | null> {
+  const files = await findConversationFiles(CONVERSATIONS_DIR);
+  if (!files.length) return null;
+
+  const withStat: { filePath: string; mtimeMs: number }[] = [];
+  for (const f of files) {
+    try {
+      const st = await fs.stat(f);
+      withStat.push({ filePath: f, mtimeMs: st.mtimeMs });
+    } catch {}
+  }
+  if (!withStat.length) return null;
+  withStat.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  // Newest first; skip files that fail to parse (mid-write or corrupt)
+  for (const cand of withStat.slice(0, 5)) {
+    try {
+      const raw = await fs.readFile(cand.filePath, "utf-8");
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.messages)) {
+        return { filePath: cand.filePath, mtimeMs: cand.mtimeMs, data };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function extractLatestPromptTokens(data: any): number | null {
+  let latest: number | null = null;
+
+  const visitStep = (step: any) => {
+    if (!step || typeof step !== "object") return;
+    const stats = step.genInfo?.stats;
+    if (stats && Number.isFinite(stats.promptTokensCount)) latest = stats.promptTokensCount;
+  };
+
+  for (const msg of data.messages ?? []) {
+    const versions: any[] = Array.isArray(msg.versions) ? msg.versions : [msg];
+    for (const v of versions) {
+      if (!v || typeof v !== "object") continue;
+      if (Array.isArray(v.steps)) { for (const s of v.steps) visitStep(s); }
+      else visitStep(v); // singleStep: the version itself is a step
+    }
+  }
+
+  return latest;
+}
+
+function ctxRecommendation(status: string, pct: number): string {
+  switch (status) {
+    case "EMERGENCY":
+      return `CONTEXT NEARLY FULL (${pct.toFixed(1)}%). Immediately: (1) write a COMPLETE handoff checkpoint to Mnemonic-MCP via save_to_section/replace_section — task goal, current state, exact next steps, key file paths, decisions made; (2) finish the current step minimally and stop expanding context. The user can resume from your checkpoint in a fresh chat.`;
+    case "CRITICAL":
+      return `Context at ${pct.toFixed(1)}%. Write/update your task checkpoint in Mnemonic-MCP NOW if not done recently, then continue with minimal verbosity: avoid re-reading large files, prefer targeted reads (offset/limit), keep responses concise.`;
+    case "WARNING":
+      return `Context at ${pct.toFixed(1)}%. Start preserving state: write/update your task checkpoint in Mnemonic-MCP and be economical — use offset/limit on file reads, avoid redundant listings, summarize instead of dumping large outputs.`;
+    default:
+      return `Context healthy (${pct.toFixed(1)}%). For long tasks, call context_status again at natural checkpoints (every few major steps) so you can checkpoint via Mnemonic-MCP before running low.`;
+  }
+}
+
+server.registerTool("context_status", {
+  title: "Context Status",
+  description:
+    "Check current LM Studio context-window usage for this conversation. Returns the authoritative context limit (from LM Studio), exact tokens used at the last generation step (read from LM Studio's own records, counted by llama.cpp's tokenizer), remaining tokens, percentage used, and a status level (NORMAL/WARNING/CRITICAL/EMERGENCY). Call this periodically during long tasks — especially before heavy work or when unsure if you can continue. On WARNING+ write/update your task checkpoint via Mnemonic-MCP; on CRITICAL/EMERGENCY create a full handoff immediately.",
+}, async () => {
+  // --- 1. Context limit from LM Studio API (authoritative) ---
+  let loadedModels: any[];
+  try {
+    const data = await lmsGetJson(`${LMS_API_BASE}/api/v0/models`);
+    loadedModels = (data.data ?? []).filter((m: any) => m.state === "loaded");
+  } catch (e: any) {
+    return { content: [{ type: "text", text: `context_status ERROR: cannot reach LM Studio API at ${LMS_API_BASE} (${e.message}). Is the server running?` }] };
+  }
+
+  // --- 2. Active conversation + exact tokens used (authoritative) ---
+  const active = await findActiveConversation();
+  if (!active) {
+    return { content: [{ type: "text", text: `context_status ERROR: no conversation files found in ${CONVERSATIONS_DIR}.` }] };
+  }
+
+  const tokensUsed = extractLatestPromptTokens(active.data);
+  if (tokensUsed == null) {
+    return { content: [{ type: "text", text: `context_status ERROR: no generation stats found in active conversation yet (${active.filePath}).` }] };
+  }
+
+  // --- 3. Pick the right loaded model for this conversation ---
+  const convModelId = active.data.lastUsedModel?.identifier;
+  let model: any = convModelId ? loadedModels.find((m) => m.id === convModelId) : undefined;
+  if (!model || !Number.isFinite(model.loaded_context_length)) {
+    model = loadedModels.find(
+      (m) => m.type !== "embeddings" && Number.isFinite(m.loaded_context_length)
+    );
+  }
+
+  // --- 4. Compose report ---
+  const lines: string[] = ["CONTEXT STATUS", "═".repeat(50)];
+
+  if (!model || !Number.isFinite(model.loaded_context_length)) {
+    lines.push("No generative model currently loaded in LM Studio.");
+    if (loadedModels.length) lines.push(`Loaded models: ${loadedModels.map((m) => m.id).join(", ")}`);
+  } else {
+    const limit = model.loaded_context_length;
+    const remaining = limit - tokensUsed;
+    const pct = (tokensUsed / limit) * 100;
+    const status = pct >= CTX_THRESHOLDS.EMERGENCY ? "EMERGENCY" : pct >= CTX_THRESHOLDS.CRITICAL ? "CRITICAL" : pct >= CTX_THRESHOLDS.WARNING ? "WARNING" : "NORMAL";
+
+    lines.push(`Model: ${model.id}`);
+    lines.push(`Context limit: ${limit} tokens`);
+    lines.push(`Tokens used (exact, at last generation step): ${tokensUsed}`);
+    lines.push(`Remaining: ${remaining} tokens`);
+    lines.push(`Percent used: ${pct.toFixed(1)}%`);
+    lines.push(`Status: ${status}`);
+    lines.push("");
+    lines.push(ctxRecommendation(status, pct));
+  }
+
+  const ageSec = Math.round((Date.now() - active.mtimeMs) / 1000);
+  lines.push("");
+  lines.push("─".repeat(50));
+  lines.push(`Source: LM Studio records (conversation file updated ${ageSec}s ago).`);
+  lines.push("Note: tokens_used is exact as of the last completed generation step; the current in-flight tool round-trip adds a small amount on top.");
+
+  return { content: [{ type: "text", text: lines.join("\n") }] };
+});
+
 // ---------- Start ----------
 
 async function main() {
